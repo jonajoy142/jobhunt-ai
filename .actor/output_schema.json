@@ -1,0 +1,12 @@
+{
+  "$schema": "https://apify.com/schemas/v1/output.ide.json",
+  "actorOutputSchemaVersion": 1,
+  "title": "JobHunt AI output",
+  "properties": {
+    "dataset": {
+      "type": "string",
+      "title": "Scraped jobs",
+      "template": "{{links.apiDefaultDatasetUrl}}/items"
+    }
+  }
+}

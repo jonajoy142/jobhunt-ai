@@ -1,0 +1,92 @@
+{
+  "$schema": "https://apify.com/schemas/v1/dataset.ide.json",
+  "actorSpecification": 1,
+  "fields": {
+    "type": "object",
+    "properties": {
+      "status": { "type": "string" },
+      "message": { "type": "string" },
+      "failed_boards": {
+        "type": "array",
+        "items": { "type": "string" }
+      },
+      "id": { "type": "string" },
+      "title": { "type": "string" },
+      "company": { "type": "string" },
+      "location": { "type": "string" },
+      "job_type": { "type": "string" },
+      "date_posted": { "type": "string" },
+      "salary_min": { "type": ["number", "string"] },
+      "salary_max": { "type": ["number", "string"] },
+      "salary_currency": { "type": "string" },
+      "description": { "type": "string" },
+      "job_url": { "type": "string" },
+      "source": { "type": "string" },
+      "is_remote": { "type": "boolean" },
+      "ai_score": { "type": ["integer", "null"] },
+      "ai_verdict": { "type": ["string", "null"] },
+      "ai_missing_skills": {
+        "type": ["array", "null"],
+        "items": { "type": "string" }
+      },
+      "keywords": {
+        "type": ["array", "null"],
+        "items": { "type": "string" }
+      }
+    }
+  },
+  "views": {
+    "overview": {
+      "title": "Jobs",
+      "transformation": {
+        "fields": [
+          "status",
+          "message",
+          "failed_boards",
+          "title",
+          "company",
+          "location",
+          "source",
+          "date_posted",
+          "job_type",
+          "salary_min",
+          "salary_max",
+          "salary_currency",
+          "is_remote",
+          "ai_score",
+          "ai_verdict",
+          "ai_missing_skills",
+          "keywords",
+          "job_url",
+          "description",
+          "id"
+        ]
+      },
+      "display": {
+        "component": "table",
+        "properties": {
+          "title": { "label": "Title", "format": "text" },
+          "company": { "label": "Company", "format": "text" },
+          "location": { "label": "Location", "format": "text" },
+          "source": { "label": "Source", "format": "text" },
+          "date_posted": { "label": "Date posted", "format": "text" },
+          "job_type": { "label": "Job type", "format": "text" },
+          "salary_min": { "label": "Salary min", "format": "text" },
+          "salary_max": { "label": "Salary max", "format": "text" },
+          "salary_currency": { "label": "Currency", "format": "text" },
+          "is_remote": { "label": "Remote", "format": "boolean" },
+          "ai_score": { "label": "AI score", "format": "number" },
+          "ai_verdict": { "label": "AI verdict", "format": "text" },
+          "ai_missing_skills": { "label": "Missing skills", "format": "array" },
+          "keywords": { "label": "Keywords", "format": "array" },
+          "job_url": { "label": "Job URL", "format": "link" },
+          "description": { "label": "Description", "format": "text" },
+          "status": { "label": "Status", "format": "text" },
+          "message": { "label": "Message", "format": "text" },
+          "failed_boards": { "label": "Failed boards", "format": "array" },
+          "id": { "label": "ID", "format": "text" }
+        }
+      }
+    }
+  }
+}

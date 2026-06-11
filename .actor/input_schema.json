@@ -1,0 +1,133 @@
+{
+  "$schema": "https://apify.com/schemas/v1/input.ide.json",
+  "title": "JobHunt AI input",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "search_term": {
+      "title": "Search term",
+      "type": "string",
+      "description": "Fallback single job title, keyword, or role to search for when search_terms is empty.",
+      "editor": "textfield",
+      "default": "software engineer",
+      "prefill": "software engineer"
+    },
+    "search_terms": {
+      "title": "Search terms",
+      "type": "array",
+      "description": "Optional list of job titles, keywords, or roles. When provided, these override search_term.",
+      "editor": "stringList",
+      "default": [],
+      "prefill": [],
+      "items": {
+        "type": "string"
+      }
+    },
+    "location": {
+      "title": "Location",
+      "type": "string",
+      "description": "Fallback single location when locations is empty.",
+      "editor": "textfield",
+      "default": "Remote",
+      "prefill": "Remote"
+    },
+    "locations": {
+      "title": "Locations",
+      "type": "array",
+      "description": "Optional list of locations. When provided, these override location.",
+      "editor": "stringList",
+      "default": [],
+      "prefill": [],
+      "items": {
+        "type": "string"
+      }
+    },
+    "posted_within_hours": {
+      "title": "Posted within last N hours",
+      "type": "integer",
+      "description": "Only return jobs posted in the last N hours.",
+      "editor": "number",
+      "default": 720,
+      "prefill": 720,
+      "minimum": 1
+    },
+    "results_wanted_per_board": {
+      "title": "Results wanted per board",
+      "type": "integer",
+      "description": "Maximum number of jobs to request from each selected board.",
+      "editor": "number",
+      "default": 5,
+      "prefill": 5,
+      "minimum": 1,
+      "maximum": 1000
+    },
+    "max_total_results": {
+      "title": "Maximum total results",
+      "type": "integer",
+      "description": "Maximum number of unique jobs returned after deduplication.",
+      "editor": "number",
+      "default": 10,
+      "prefill": 10,
+      "minimum": 1,
+      "maximum": 5000
+    },
+    "job_boards": {
+      "title": "Job boards",
+      "type": "array",
+      "description": "Select which job boards to scrape. LinkedIn is the default stable board for Apify tests. Indeed remains available but can be unavailable or blocked by upstream access.",
+      "editor": "select",
+      "default": ["linkedin"],
+      "prefill": ["linkedin"],
+      "items": {
+        "type": "string",
+        "enum": ["linkedin", "indeed", "glassdoor", "zip_recruiter", "google"],
+        "enumTitles": ["LinkedIn Jobs", "Indeed", "Glassdoor", "ZipRecruiter", "Google Jobs"]
+      },
+      "uniqueItems": true,
+      "minItems": 1
+    },
+    "enable_ai_scoring": {
+      "title": "Enable AI scoring",
+      "type": "boolean",
+      "description": "Score each job against your resume or skills using Claude AI.",
+      "editor": "checkbox",
+      "default": false,
+      "prefill": false
+    },
+    "resume_or_key_skills": {
+      "title": "Resume or key skills",
+      "type": "string",
+      "description": "Paste your resume or a concise skills summary. Used only when AI scoring is enabled.",
+      "editor": "textarea",
+      "default": "",
+      "prefill": ""
+    },
+    "anthropic_api_key": {
+      "title": "Anthropic API key",
+      "type": "string",
+      "description": "Your Anthropic API key. Required only when AI scoring is enabled.",
+      "editor": "textfield",
+      "isSecret": true,
+      "prefill": ""
+    },
+    "minimum_ai_score": {
+      "title": "Minimum AI score",
+      "type": "integer",
+      "description": "When AI scoring is enabled, only push jobs with this score or higher. Use 0 to disable filtering.",
+      "editor": "number",
+      "default": 0,
+      "prefill": 0,
+      "minimum": 0,
+      "maximum": 100
+    },
+    "indeed_country": {
+      "title": "Indeed country",
+      "type": "string",
+      "description": "Country used by JobSpy for Indeed searches when Indeed is selected.",
+      "editor": "textfield",
+      "default": "USA",
+      "prefill": "USA"
+    }
+  },
+  "required": []
+}

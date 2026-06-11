@@ -1,0 +1,19 @@
+{
+  "$schema": "https://apify.com/schemas/v1/actor.ide.json",
+  "actorSpecification": 1,
+  "name": "jobhunt-ai",
+  "title": "JobHunt AI - Multi-Board Job Scraper with AI Matching",
+  "description": "Scrape jobs from LinkedIn by default, with optional best-effort support for Indeed, Google Jobs, ZipRecruiter, and Glassdoor when available. Deduplicates results and optionally scores jobs against your resume using Claude AI.",
+  "version": "0.1",
+  "buildTag": "latest",
+  "meta": {
+    "templateId": "python-start",
+    "generatedBy": "Codex with GPT-5"
+  },
+  "input": "./input_schema.json",
+  "output": "./output_schema.json",
+  "storages": {
+    "dataset": "./dataset_schema.json"
+  },
+  "dockerfile": "../Dockerfile"
+}
