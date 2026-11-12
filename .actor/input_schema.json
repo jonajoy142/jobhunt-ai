@@ -87,9 +87,9 @@
       "minItems": 1
     },
     "enable_ai_scoring": {
-      "title": "Enable AI scoring",
+      "title": "Enable Laya & JEV Decision Engine",
       "type": "boolean",
-      "description": "Score each job against your resume or skills using Claude AI.",
+      "description": "Evaluate fit, offer probability P(Offer), and Job Expected Value (JEV) locally with 0 API keys using the open-source Laya System-1 decision model.",
       "editor": "checkbox",
       "default": false,
       "prefill": false
@@ -97,15 +97,15 @@
     "resume_or_key_skills": {
       "title": "Resume or key skills",
       "type": "string",
-      "description": "Paste your resume or a concise skills summary. Used only when AI scoring is enabled.",
+      "description": "Paste your resume or skills summary. Used by Laya to calculate skill matches, missing requirements, and JEV probability. If left blank, Laya evaluates baseline role quality.",
       "editor": "textarea",
       "default": "",
       "prefill": ""
     },
     "anthropic_api_key": {
-      "title": "Anthropic API key",
+      "title": "Anthropic API key (Optional)",
       "type": "string",
-      "description": "Your Anthropic API key. Required only when AI scoring is enabled.",
+      "description": "Optional Claude API key. Not required because Laya runs locally inside the actor for free without any API key.",
       "editor": "textfield",
       "isSecret": true,
       "prefill": ""
@@ -113,7 +113,17 @@
     "minimum_ai_score": {
       "title": "Minimum AI score",
       "type": "integer",
-      "description": "When AI scoring is enabled, only push jobs with this score or higher. Use 0 to disable filtering.",
+      "description": "When AI scoring is enabled, only push jobs with this match score or higher (0-100). Use 0 to disable filtering.",
+      "editor": "number",
+      "default": 0,
+      "prefill": 0,
+      "minimum": 0,
+      "maximum": 100
+    },
+    "minimum_jev_score": {
+      "title": "Minimum JEV score",
+      "type": "integer",
+      "description": "When AI scoring is enabled, only push jobs with this Job Expected Value (JEV) score or higher (0-100). Use 0 to disable filtering.",
       "editor": "number",
       "default": 0,
       "prefill": 0,

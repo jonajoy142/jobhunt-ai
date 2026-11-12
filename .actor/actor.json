@@ -2,13 +2,13 @@
   "$schema": "https://apify.com/schemas/v1/actor.ide.json",
   "actorSpecification": 1,
   "name": "jobhunt-ai",
-  "title": "JobHunt AI - Multi-Board Job Scraper with AI Matching",
-  "description": "Scrape jobs from LinkedIn by default, with optional best-effort support for Indeed, Google Jobs, ZipRecruiter, and Glassdoor when available. Deduplicates results and optionally scores jobs against your resume using Claude AI.",
+  "title": "JobHunt AI - Multi-Board Job Scraper with Laya & JEV Decision Making",
+  "description": "Scrape jobs from LinkedIn, Indeed, Google Jobs, ZipRecruiter, and Glassdoor with zero API keys required. Features open-source Laya System-1 decision scoring and Job Expected Value (JEV) market ranking.",
   "version": "0.1",
   "buildTag": "latest",
   "meta": {
     "templateId": "python-start",
-    "generatedBy": "Codex with GPT-5"
+    "generatedBy": "Antigravity with Gemini 3.8 Flash"
   },
   "input": "./input_schema.json",
   "output": "./output_schema.json",

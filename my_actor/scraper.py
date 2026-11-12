@@ -21,7 +21,18 @@ DEFAULT_MAX_PARALLEL_BOARDS = 3
 BOARD_PRIORITY = ("linkedin", "indeed", "zip_recruiter", "google", "glassdoor")
 GLOBAL_TIMEOUT_SECONDS = 180
 BOARD_TIMEOUT_SECONDS = 30
+MAX_BOARD_ATTEMPTS = 3
+RETRY_DELAY_SECONDS = 1.0
 JOBSPY_PATCHED = False
+
+BOARD_DISPLAY_NAMES = {
+    "linkedin": "LinkedIn",
+    "indeed": "Indeed",
+    "google": "Google",
+    "glassdoor": "Glassdoor",
+    "zip_recruiter": "ZipRecruiter",
+}
+
 EXPECTED_BOARD_ERROR_MARKERS = (
     "connection refused",
     "failed to establish a new connection",
@@ -30,6 +41,17 @@ EXPECTED_BOARD_ERROR_MARKERS = (
     "httpsconnectionpool",
     "read timed out",
     "connect timeout",
+    "timeout",
+    "timed out",
+    "429",
+    "403",
+    "500",
+    "502",
+    "503",
+    "504",
+    "blocked",
+    "rate limit",
+    "too many requests",
 )
 
 
@@ -87,17 +109,18 @@ def _clean_bool(value: Any) -> bool:
 
 
 def _dedup_key(job: dict[str, Any]) -> str:
-    if job["job_url"]:
+    if job.get("job_url"):
         return job["job_url"].strip().lower()
-    if job["id"]:
-        return f"{job['source']}:{job['id']}".strip().lower()
-    return f"{job['source']}:{job['title']}:{job['company']}:{job['location']}".strip().lower()
+    if job.get("id"):
+        return f"{job.get('source', '')}:{job['id']}".strip().lower()
+    return f"{job.get('source', '')}:{job.get('title', '')}:{job.get('company', '')}:{job.get('location', '')}".strip().lower()
 
 
 def _is_expected_board_exception(exc: BaseException) -> bool:
     expected_types = (
         requests_exceptions.ConnectionError,
         requests_exceptions.Timeout,
+        requests_exceptions.HTTPError,
         MaxRetryError,
         ConnectionRefusedError,
         TimeoutError,
@@ -127,6 +150,10 @@ def _format_board_error(error: BoardError) -> str:
     return f"{error.error_type}: {message}" if message else error.error_type
 
 
+def _board_display(board: str) -> str:
+    return BOARD_DISPLAY_NAMES.get(board.lower(), board.title())
+
+
 def _row_to_job(row: pd.Series) -> dict[str, Any]:
     job = JobPost(
         id=_clean_str(row.get("id", "")),
@@ -150,6 +177,42 @@ def _row_to_job(row: pd.Series) -> dict[str, Any]:
     return job.model_dump()
 
 
+def _append_deduped_jobs(
+    df: pd.DataFrame,
+    jobs: list[dict[str, Any]],
+    seen: set[str],
+    limit: int,
+) -> None:
+    for _, row in df.fillna("").iterrows():
+        if len(jobs) >= limit:
+            break
+        try:
+            job = _row_to_job(row)
+        except Exception:
+            Actor.log.exception("Skipping malformed job row")
+            continue
+
+        key = _dedup_key(job)
+        if key in seen:
+            continue
+        seen.add(key)
+        jobs.append(job)
+
+
+def _ordered_boards(boards: list[str]) -> list[str]:
+    priority_boards = [board for board in BOARD_PRIORITY if board in boards]
+    remaining_boards = [board for board in boards if board not in BOARD_PRIORITY]
+    return priority_boards + remaining_boards
+
+
+def _max_parallel_boards(inp: ActorInput) -> int:
+    value = getattr(inp, "max_parallel_boards", DEFAULT_MAX_PARALLEL_BOARDS)
+    try:
+        return max(1, int(value))
+    except (TypeError, ValueError):
+        return DEFAULT_MAX_PARALLEL_BOARDS
+
+
 def _scrape_query(inp: ActorInput, search_term: str, location: str, board: str) -> pd.DataFrame | None:
     return scrape_jobs(
         site_name=[board],
@@ -171,10 +234,17 @@ def _suppress_jobspy_log_noise() -> None:
         "JobSpy:Glassdoor",
         "JobSpy:ZipRecruiter",
         "JobSpy:Google",
+        "jobspy",
+        "jobspy.google",
+        "jobspy.linkedin",
+        "jobspy.indeed",
+        "jobspy.glassdoor",
+        "jobspy.ziprecruiter",
     ):
         logger = logging.getLogger(logger_name)
         logger.disabled = True
         logger.propagate = False
+        logger.setLevel(logging.CRITICAL + 1)
 
 
 def _patch_jobspy_runtime() -> None:
@@ -215,20 +285,6 @@ def _patch_jobspy_runtime() -> None:
     limited_setup_session._jobhunt_limited = True  # type: ignore[attr-defined]
     RequestsRotating.setup_session = limited_setup_session
     JOBSPY_PATCHED = True
-
-
-def _ordered_boards(boards: list[str]) -> list[str]:
-    priority_boards = [board for board in BOARD_PRIORITY if board in boards]
-    remaining_boards = [board for board in boards if board not in BOARD_PRIORITY]
-    return priority_boards + remaining_boards
-
-
-def _max_parallel_boards(inp: ActorInput) -> int:
-    value = getattr(inp, "max_parallel_boards", DEFAULT_MAX_PARALLEL_BOARDS)
-    try:
-        return max(1, int(value))
-    except (TypeError, ValueError):
-        return DEFAULT_MAX_PARALLEL_BOARDS
 
 
 def _scrape_query_process(
@@ -323,90 +379,69 @@ def _deadline_expired(deadline: float) -> bool:
     return _seconds_remaining(deadline) <= 0
 
 
-def _scrape_board(
+def _scrape_board_with_retries(
     inp: ActorInput,
     search_term: str,
     location: str,
     board: str,
     deadline: float,
-) -> tuple[pd.DataFrame | None, BoardError | None]:
-    remaining = _seconds_remaining(deadline)
-    if remaining <= 0:
-        return None, BoardError("Timeout", "global scrape timeout reached", True)
+) -> tuple[list[dict[str, Any]], BoardError | None]:
+    """Scrapes a single board with transient retry isolation.
 
-    timeout_seconds = min(BOARD_TIMEOUT_SECONDS, remaining)
-    Actor.log.info(f"Scraping board '{board}' for '{search_term}' in '{location}'")
-    df, error = _run_scrape_query_with_timeout(inp, search_term, location, board, timeout_seconds)
-    if error:
-        reason = _format_board_error(error)
-        if error.expected:
-            Actor.log.warning(f"Board unavailable/blocked; continuing. Board: {board}; reason: {reason}")
-        else:
-            Actor.log.warning(f"Board failed; continuing. Board: {board}; reason: {reason}")
-        return None, error
+    Returns (job_records, None) on success (including 0 jobs returned).
+    Returns ([], BoardError) if all retry attempts failed with exceptions/timeouts.
+    """
+    board_name = _board_display(board)
+    last_error: BoardError | None = None
 
-    if df is None or df.empty:
-        Actor.log.warning(f"Board returned 0 results. Board: {board}; query: '{search_term}'; location: '{location}'")
-        return None, None
-
-    return df, None
-
-
-def _scrape_frames(
-    inp: ActorInput,
-    search_term: str,
-    location: str,
-    boards: list[str],
-    disabled_boards_this_run: set[str],
-    failed_boards: set[str],
-    jobs: list[dict[str, Any]],
-    seen: set[str],
-    deadline: float,
-) -> None:
-    max_parallel_boards = _max_parallel_boards(inp)
-
-    for i in range(0, len(boards), max_parallel_boards):
-        if len(jobs) >= inp.max_results_total:
-            Actor.log.info(f"Reached max_total_results={inp.max_results_total}; stopping scrape")
-            break
-        if _deadline_expired(deadline):
-            Actor.log.warning("Global scrape timeout reached; returning partial results")
+    for attempt in range(1, MAX_BOARD_ATTEMPTS + 1):
+        remaining = _seconds_remaining(deadline)
+        if remaining <= 1.0:
+            last_error = BoardError("Timeout", "global scrape timeout reached", True)
+            Actor.log.warning(f"{board_name} attempt {attempt}/{MAX_BOARD_ATTEMPTS} timed out (deadline reached)")
             break
 
-        board_batch = [board for board in boards[i : i + max_parallel_boards] if board not in disabled_boards_this_run]
-        if not board_batch:
-            continue
+        timeout_seconds = min(float(BOARD_TIMEOUT_SECONDS), remaining)
+        df, error = _run_scrape_query_with_timeout(inp, search_term, location, board, timeout_seconds)
 
-        Actor.log.info(f"Scraping board batch: {board_batch}")
-        for board in board_batch:
-            if len(jobs) >= inp.max_results_total:
-                Actor.log.info(f"Reached max_total_results={inp.max_results_total}; stopping scrape")
+        if error is not None:
+            last_error = error
+            error_reason = "timed out" if error.error_type == "Timeout" else f"failed: {_format_board_error(error)}"
+
+            if attempt < MAX_BOARD_ATTEMPTS and _seconds_remaining(deadline) > 2.0:
+                Actor.log.warning(f"{board_name} attempt {attempt}/{MAX_BOARD_ATTEMPTS} {error_reason}")
+                Actor.log.warning(f"Retrying {board_name}")
+                time.sleep(RETRY_DELAY_SECONDS)
+                continue
+            else:
+                Actor.log.warning(f"{board_name} unavailable after {attempt} attempts: {_format_board_error(error)}")
                 break
-            if _deadline_expired(deadline):
-                Actor.log.warning("Global scrape timeout reached; returning partial results")
-                break
-            if board in disabled_boards_this_run:
-                Actor.log.warning(f"Skipping disabled board for remainder of run. Board: {board}")
+
+        # Succeeded without exception: clean 0 jobs
+        if df is None or df.empty:
+            Actor.log.warning(f"{board_name} returned 0 jobs")
+            return [], None
+
+        # Succeeded without exception: parse jobs
+        records: list[dict[str, Any]] = []
+        for _, row in df.fillna("").iterrows():
+            try:
+                records.append(_row_to_job(row))
+            except Exception:
+                Actor.log.exception(f"Skipping malformed job row from {board_name}")
                 continue
 
-            df, error = _scrape_board(inp, search_term, location, board, deadline)
-            if error:
-                disabled_boards_this_run.add(board)
-                failed_boards.add(board)
-                Actor.log.warning(f"Marked board unavailable for remainder of run. Board: {board}")
-                if board == "indeed":
-                    Actor.log.warning("Indeed failed; disabling Indeed for this run")
-                continue
-            if df is not None and not df.empty:
-                _append_deduped_jobs(df, jobs, seen, inp.max_results_total)
+        Actor.log.info(f"{board_name} returned {len(records)} jobs")
+        return records, None
+
+    return [], last_error
 
 
 def _scrape_sync(inp: ActorInput) -> ScrapeOutcome:
     _patch_jobspy_runtime()
-    jobs: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    disabled_boards_this_run: set[str] = set()
+    all_raw_jobs: list[dict[str, Any]] = []
     failed_boards: set[str] = set()
+    disabled_boards_this_run: set[str] = set()
     deadline = time.monotonic() + GLOBAL_TIMEOUT_SECONDS
 
     search_terms = inp.effective_search_terms()
@@ -414,45 +449,68 @@ def _scrape_sync(inp: ActorInput) -> ScrapeOutcome:
     boards = _ordered_boards(inp.boards)
 
     for search_term in search_terms:
-        if len(jobs) >= inp.max_results_total:
-            Actor.log.info(f"Reached max_total_results={inp.max_results_total}; stopping scrape")
-            return ScrapeOutcome(jobs=jobs, failed_boards=sorted(failed_boards))
+        if _deadline_expired(deadline):
+            Actor.log.warning("Global scrape timeout reached; returning partial results")
+            break
+
         for location in locations:
-            if len(jobs) >= inp.max_results_total:
-                Actor.log.info(f"Reached max_total_results={inp.max_results_total}; stopping scrape")
-                return ScrapeOutcome(jobs=jobs, failed_boards=sorted(failed_boards))
             if _deadline_expired(deadline):
                 Actor.log.warning("Global scrape timeout reached; returning partial results")
-                return ScrapeOutcome(jobs=jobs, failed_boards=sorted(failed_boards))
+                break
 
-            active_boards = [board for board in boards if board not in disabled_boards_this_run]
+            active_boards = [b for b in boards if b not in disabled_boards_this_run]
             if not active_boards:
-                Actor.log.warning("All selected boards are unavailable; returning partial results")
-                return ScrapeOutcome(jobs=jobs, failed_boards=sorted(failed_boards))
+                Actor.log.warning("All selected boards are unavailable; returning collected results")
+                break
 
-            Actor.log.info(f"Scraping '{search_term}' in '{location}' from {boards}")
-            jobs_before_combo = len(jobs)
-            _scrape_frames(
-                inp,
-                search_term,
-                location,
-                active_boards,
-                disabled_boards_this_run,
-                failed_boards,
-                jobs,
-                seen,
-                deadline,
-            )
+            Actor.log.info(f"Scraping '{search_term}' in '{location}'")
+            Actor.log.info(f"Selected boards: {active_boards}")
 
-            if len(jobs) == jobs_before_combo:
-                Actor.log.info(f"No jobs found for '{search_term}' in '{location}'")
+            for board in active_boards:
+                if _deadline_expired(deadline):
+                    Actor.log.warning("Global scrape timeout reached; returning partial results")
+                    break
 
-    if len(jobs) > inp.max_results_total:
-        jobs = jobs[: inp.max_results_total]
+                Actor.log.info(f"Trying board: {board}")
+                try:
+                    board_jobs, error = _scrape_board_with_retries(
+                        inp, search_term, location, board, deadline
+                    )
+                except Exception as exc:
+                    Actor.log.exception(f"Unexpected error scraping board '{board}'")
+                    board_jobs = []
+                    error = BoardError(type(exc).__name__, str(exc), False)
 
-    Actor.log.info(f"Applying max_total_results={inp.max_results_total}, returning {len(jobs)} jobs")
+                if error is not None:
+                    failed_boards.add(board)
+                    disabled_boards_this_run.add(board)
+                elif board_jobs:
+                    all_raw_jobs.extend(board_jobs)
 
-    return ScrapeOutcome(jobs=jobs, failed_boards=sorted(failed_boards))
+    # 1. Combine all collected jobs
+    total_raw = len(all_raw_jobs)
+    Actor.log.info(f"Total collected before deduplication: {total_raw}")
+
+    # 2. Deduplicate jobs
+    deduped_jobs: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for job in all_raw_jobs:
+        key = _dedup_key(job)
+        if key not in seen:
+            seen.add(key)
+            deduped_jobs.append(job)
+
+    total_deduped = len(deduped_jobs)
+    Actor.log.info(f"Total after deduplication: {total_deduped}")
+
+    sorted_failed_boards = sorted(failed_boards)
+    Actor.log.info(f"Failed boards: {sorted_failed_boards}")
+
+    # 3. Apply max_results_total cap
+    final_jobs = deduped_jobs[: inp.max_results_total]
+    Actor.log.info(f"Returning {len(final_jobs)} jobs")
+
+    return ScrapeOutcome(jobs=final_jobs, failed_boards=sorted_failed_boards)
 
 
 def scrape(inp: ActorInput) -> list[dict[str, Any]]:
@@ -461,25 +519,3 @@ def scrape(inp: ActorInput) -> list[dict[str, Any]]:
 
 def scrape_with_metadata(inp: ActorInput) -> ScrapeOutcome:
     return _scrape_sync(inp)
-
-
-def _append_deduped_jobs(
-    df: pd.DataFrame,
-    jobs: list[dict[str, Any]],
-    seen: set[str],
-    limit: int,
-) -> None:
-    for _, row in df.fillna("").iterrows():
-        if len(jobs) >= limit:
-            break
-        try:
-            job = _row_to_job(row)
-        except Exception:
-            Actor.log.exception("Skipping malformed job row")
-            continue
-
-        key = _dedup_key(job)
-        if key in seen:
-            continue
-        seen.add(key)
-        jobs.append(job)

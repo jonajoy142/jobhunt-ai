@@ -13,12 +13,13 @@ INPUT_ALIASES = {
     "job_boards": "boards",
     "resume_or_key_skills": "resume_text",
     "minimum_ai_score": "min_ai_score",
+    "minimum_jev_score": "min_jev_score",
     "indeed_country": "country_indeed",
 }
 
 
 class ActorInput(BaseModel):
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)
 
     search_term: str = "software engineer"
     search_terms: list[str] = Field(default_factory=list)
@@ -32,6 +33,7 @@ class ActorInput(BaseModel):
     resume_text: str = ""
     anthropic_api_key: str = ""
     min_ai_score: int = Field(default=0, ge=0, le=100)
+    min_jev_score: float = Field(default=0.0, ge=0.0, le=100.0)
     country_indeed: str = Field(default="USA", min_length=1)
 
     @model_validator(mode="before")
@@ -94,7 +96,7 @@ class ActorInput(BaseModel):
 
 
 class JobPost(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     id: str = ""
     title: str = ""
@@ -113,3 +115,8 @@ class JobPost(BaseModel):
     ai_verdict: str | None = None
     ai_missing_skills: list[str] | None = None
     keywords: list[str] | None = None
+    jev_score: float | None = Field(default=None, ge=0.0, le=100.0)
+    jev_tier: str | None = None
+    p_offer: float | None = Field(default=None, ge=0.0, le=1.0)
+    market_value: float | None = None
+    expected_return: float | None = None

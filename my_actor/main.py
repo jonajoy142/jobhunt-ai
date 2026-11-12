@@ -102,19 +102,20 @@ async def main() -> None:
             return
 
         pushed_count = 0
-        if inp.enable_ai_scoring and inp.anthropic_api_key and inp.resume_text:
-            from .scorer import create_client, extract_keywords, score_job
+        if inp.enable_ai_scoring:
+            from .scorer import evaluate_job
 
-            client = create_client(inp.anthropic_api_key)
-            Actor.log.info("AI scoring enabled; scoring jobs and extracting keywords")
+            Actor.log.info(
+                f"Laya Decision Model & JEV Valuation enabled; evaluating {len(jobs)} jobs locally"
+            )
 
             scored_jobs: list[dict[str, Any]] = []
             for index, job in enumerate(jobs):
                 if time.monotonic() >= run_deadline:
                     remaining_jobs = jobs[index:]
-                    if inp.min_ai_score > 0:
+                    if inp.min_ai_score > 0 or inp.min_jev_score > 0:
                         Actor.log.warning(
-                            "Run timeout guard reached; dropping remaining unscored jobs because min_ai_score is set"
+                            "Run timeout guard reached; dropping remaining unscored jobs because score filters are active"
                         )
                     else:
                         Actor.log.warning(
@@ -124,22 +125,31 @@ async def main() -> None:
                         scored_jobs.extend(remaining_jobs)
                     break
 
-                job.update(score_job(client, job, inp.resume_text))
-                if inp.min_ai_score > 0 and (job["ai_score"] or 0) < inp.min_ai_score:
+                eval_metrics = evaluate_job(
+                    job,
+                    resume_text=inp.resume_text,
+                    anthropic_api_key=inp.anthropic_api_key,
+                    hours_old=inp.hours_old,
+                )
+                job.update(eval_metrics)
+
+                if inp.min_ai_score > 0 and (job.get("ai_score") or 0) < inp.min_ai_score:
                     continue
-                job["keywords"] = [] if job["ai_verdict"] == "error" else extract_keywords(client, job)
+                if inp.min_jev_score > 0 and (job.get("jev_score") or 0.0) < inp.min_jev_score:
+                    continue
+
                 scored_jobs.append(job)
                 await Actor.push_data(job, charged_event_name=CHARGED_EVENT_NAME)
                 pushed_count += 1
 
             jobs = scored_jobs
-            if inp.min_ai_score > 0:
-                Actor.log.info(f"{len(jobs)} jobs matched score >= {inp.min_ai_score}")
+            if inp.min_ai_score > 0 or inp.min_jev_score > 0:
+                Actor.log.info(
+                    f"{len(jobs)} jobs matched score thresholds (min_ai_score={inp.min_ai_score}, min_jev_score={inp.min_jev_score})"
+                )
         else:
-            if inp.enable_ai_scoring:
-                Actor.log.warning("AI scoring was requested but resume_text or anthropic_api_key is missing; pushing unscored jobs")
-            if inp.min_ai_score > 0:
-                Actor.log.warning("min_ai_score is ignored when AI scoring is disabled or incomplete")
+            if inp.min_ai_score > 0 or inp.min_jev_score > 0:
+                Actor.log.warning("Score threshold filters are ignored when AI scoring is disabled")
             pushed_count = await _push_jobs(jobs)
 
         Actor.log.info(f"Done. {pushed_count} jobs pushed to dataset.")
